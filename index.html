@@ -55,17 +55,30 @@
             </div>
         </div>
 
-        <!-- 策略提示區塊 -->
-        <div class="mx-4 mb-6 bg-amber-50 border-l-4 border-amber-500 p-4 rounded-r-lg shadow-sm">
-            <div class="flex items-start gap-3">
-                <i class="fa-solid fa-triangle-exclamation text-amber-500 mt-1 text-lg"></i>
-                <div>
-                    <h3 class="font-bold text-amber-800">拜票策略建議</h3>
-                    <p class="text-sm text-amber-700 mt-1">
-                        最佳路徑為依照下方時間軸推進。請注意 <strong>20:30</strong> 有兩個不同地點，建議候選人維持原線(華民街)，安排志工前往另一處(府前路)。
-                    </p>
-                </div>
+        <!-- 動態下一站提示區塊 (新增) -->
+        <div id="next-stop-banner" class="hidden"></div>
+
+        <!-- 策略提示區塊 (縮小並改為靜態提醒) -->
+        <div class="mx-4 mb-6 bg-amber-50 border border-amber-200 px-3 py-2 rounded-lg shadow-sm flex items-start gap-2 text-sm">
+            <i class="fa-solid fa-triangle-exclamation text-amber-500 mt-0.5"></i>
+            <span class="text-amber-800">
+                <strong>路線重疊提醒：</strong>20:30 兩點衝突，建議候選人維持原線(華民街)，安排志工前往另一處(府前路)。
+            </span>
+        </div>
+
+        <!-- 提前到場設定區塊 (新增) -->
+        <div class="mx-4 mb-6 bg-white p-3 rounded-lg shadow-sm border border-slate-200 flex justify-between items-center">
+            <div class="font-bold text-slate-700 flex items-center gap-2">
+                <i class="fa-solid fa-stopwatch text-blue-500"></i>
+                提前到場設定
             </div>
+            <select id="early-minutes" class="bg-slate-50 border border-slate-300 text-slate-700 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2 outline-none cursor-pointer font-bold">
+                <option value="0">不用提前 (準時)</option>
+                <option value="3">提前 3 分鐘</option>
+                <option value="5" selected>提前 5 分鐘</option>
+                <option value="10">提前 10 分鐘</option>
+                <option value="15">提前 15 分鐘</option>
+            </select>
         </div>
 
         <!-- 時間軸清單 -->
@@ -99,8 +112,21 @@
         ];
 
         let selectedStopId = scheduleData[0].id;
+        let nextStopId = null; // 新增：自動追蹤最接近的下一站
+        let earlyMinutes = 5;  // 新增：使用者設定的提前分鐘數預設值
 
         // --- 2. 輔助函式 ---
+        // 計算建議抵達時間 (預設提前 5 分鐘)
+        const getSuggestedTime = (timeStr, minutesBefore = 5) => {
+            let [h, m] = timeStr.split(':').map(Number);
+            m -= minutesBefore;
+            if (m < 0) {
+                m += 60;
+                h -= 1;
+            }
+            return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+        };
+
         // 取得 Google Maps 嵌入網址
         const getEmbedMapUrl = (location) => {
             return `https://maps.google.com/maps?q=${encodeURIComponent(location)}&t=m&z=16&output=embed&iwloc=near`;
@@ -111,74 +137,165 @@
             return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}`;
         };
 
-        // 更新頂部時鐘
-        const updateClock = () => {
-            const now = new Date();
-            const timeString = now.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false });
-            document.getElementById('current-time').innerText = timeString;
-        };
-
         // 更新上方地圖區域
         const updateMapDisplay = (stop) => {
             document.getElementById('gmap-iframe').src = getEmbedMapUrl(stop.location);
             document.getElementById('map-label').innerText = `預覽: ${stop.location}`;
         };
 
+        // 計算並更新「自動追蹤下一站」狀態
+        const updateNextStopStatus = () => {
+            const now = new Date();
+            let foundId = null;
+            
+            for (let stop of scheduleData) {
+                const [h, m] = stop.time.split(':').map(Number);
+                const stopTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m, 0);
+                
+                // 垃圾車預定時間過了 2 分鐘後，自動跳轉判斷為「下一站」
+                if (stopTime.getTime() + 2 * 60000 > now.getTime()) {
+                    foundId = stop.id;
+                    break;
+                }
+            }
+            
+            // 如果目標改變了 (或剛打開網頁，或是更改了提前時間)，才重新渲染畫面
+            if (foundId !== nextStopId || document.getElementById('next-stop-banner').dataset.early !== earlyMinutes.toString()) {
+                nextStopId = foundId;
+                const bannerEl = document.getElementById('next-stop-banner');
+                bannerEl.dataset.early = earlyMinutes.toString(); // 紀錄目前的設定值，避免重複渲染
+                
+                // 自動切換地圖預覽到下一站
+                if (nextStopId) {
+                    selectedStopId = nextStopId;
+                    const nextStop = scheduleData.find(s => s.id === nextStopId);
+                    updateMapDisplay(nextStop);
+                }
+                
+                renderTimeline(); // 重新渲染時間軸
+                
+                // 更新緊急出發面板
+                if (bannerEl) {
+                    if (nextStopId) {
+                        const nextStop = scheduleData.find(s => s.id === nextStopId);
+                        const suggested = getSuggestedTime(nextStop.time, earlyMinutes);
+                        bannerEl.innerHTML = `
+                            <div class="flex items-center gap-3">
+                                <div class="bg-white p-2 rounded-full shadow-sm text-emerald-500">
+                                    <i class="fa-solid fa-person-running text-xl animate-bounce"></i>
+                                </div>
+                                <div class="flex-1">
+                                    <h3 class="font-bold text-emerald-900 text-lg leading-tight mb-1">目標：${nextStop.location}</h3>
+                                    <div class="flex flex-wrap items-center gap-2">
+                                        <span class="bg-white text-emerald-800 font-black px-2 py-1 rounded shadow-sm text-lg border border-emerald-200">
+                                            <i class="fa-solid fa-truck text-emerald-600"></i> ${nextStop.time}
+                                        </span>
+                                        ${earlyMinutes > 0 ? `
+                                            <span class="bg-amber-100 text-amber-800 font-bold px-2 py-1 rounded shadow-sm text-sm border border-amber-300">
+                                                請於 ${suggested} 到場
+                                            </span>
+                                        ` : ''}
+                                    </div>
+                                </div>
+                                <a href="${getDirectionsUrl(nextStop.location)}" target="_blank" class="bg-emerald-600 text-white w-12 h-12 flex items-center justify-center rounded-full shadow-md hover:bg-emerald-700 transition-colors shrink-0">
+                                    <i class="fa-solid fa-location-arrow text-xl"></i>
+                                </a>
+                            </div>
+                        `;
+                        bannerEl.className = "mx-4 mb-4 bg-emerald-100 border border-emerald-300 p-3 rounded-xl shadow-sm block";
+                    } else {
+                        bannerEl.innerHTML = `
+                            <div class="flex items-center gap-3 justify-center text-slate-500">
+                                <i class="fa-solid fa-flag-checkered text-xl"></i>
+                                <span class="font-bold">今日行程已全數結束！辛苦了！</span>
+                            </div>
+                        `;
+                        bannerEl.className = "mx-4 mb-4 bg-slate-100 border border-slate-300 p-4 rounded-xl shadow-sm block";
+                    }
+                }
+            }
+        };
+
+        // 更新頂部時鐘
+        const updateClock = () => {
+            const now = new Date();
+            const timeString = now.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false });
+            document.getElementById('current-time').innerText = timeString;
+            updateNextStopStatus(); // 每秒檢查一次是否該跳下一站
+        };
+
         // --- 3. 渲染行程清單 ---
         const renderTimeline = () => {
             const container = document.getElementById('timeline-container');
+            if(!container) return;
             container.innerHTML = ''; // 清空現有內容
 
             scheduleData.forEach(stop => {
                 const isSelected = stop.id === selectedStopId;
+                const isNext = stop.id === nextStopId;
+                const suggestedTime = getSuggestedTime(stop.time, earlyMinutes); // 依照設定提前
                 
                 // 動態設定樣式類別
                 let cardClasses = 'bg-white border-slate-200 hover:border-blue-300';
-                if (isSelected) {
+                if (isNext) {
+                    cardClasses = 'bg-emerald-50 border-emerald-400 ring-2 ring-emerald-400 shadow-md'; // 目標站特別標記綠色
+                } else if (isSelected) {
                     cardClasses = 'bg-blue-50 border-blue-400 ring-1 ring-blue-400';
                 } else if (stop.conflict) {
                     cardClasses = 'bg-red-50/50 border-red-200';
                 }
 
-                const dotClasses = isSelected ? 'border-blue-600 bg-blue-100' : 'border-blue-300 bg-white';
+                const dotClasses = isNext ? 'border-emerald-600 bg-emerald-100 scale-125' : (isSelected ? 'border-blue-600 bg-blue-100' : 'border-slate-300 bg-white');
                 const timeColorClasses = stop.conflict ? 'text-red-600' : 'text-blue-700';
-                const iconColorClasses = isSelected ? 'text-blue-600' : 'text-slate-400';
+                const iconColorClasses = isNext ? 'text-emerald-600' : (isSelected ? 'text-blue-600' : 'text-slate-400');
 
                 // 生成單個項目的 HTML
                 const itemHTML = `
                     <div class="relative pl-6 timeline-item" data-id="${stop.id}">
                         <!-- 時間軸圓點 -->
-                        <div class="absolute -left-[9px] top-1 w-4 h-4 rounded-full border-2 ${dotClasses} transition-colors"></div>
+                        <div class="absolute -left-[9px] top-1 w-4 h-4 rounded-full border-2 ${dotClasses} transition-all"></div>
 
                         <!-- 行程卡片 -->
                         <div class="p-4 rounded-xl border transition-all cursor-pointer shadow-sm ${cardClasses}">
                             <div class="flex justify-between items-start mb-2">
                                 <div class="flex items-center gap-2">
-                                    <span class="font-bold text-lg ${timeColorClasses}">
-                                        ${stop.time}
-                                    </span>
-                                    ${stop.conflict ? '<span class="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded border border-red-200">時間重疊</span>' : ''}
+                                    ${isNext ? '<span class="bg-amber-500 text-white text-xs px-2 py-0.5 rounded border border-amber-600 shadow-sm animate-pulse">目前目標</span>' : ''}
+                                    ${stop.conflict ? '<span class="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded border border-red-200">路線重疊</span>' : ''}
                                 </div>
-                                <span class="text-xs text-slate-500 bg-slate-100 px-2 py-1 rounded">
+                                <span class="text-xs text-slate-500 bg-slate-100 px-2 py-1 rounded whitespace-nowrap">
                                     ${stop.note}
                                 </span>
                             </div>
                             
-                            <h3 class="font-bold text-slate-800 text-lg mb-3 flex items-center gap-2">
+                            <!-- 雙時間顯眼顯示區 -->
+                            <div class="flex items-end gap-3 mb-3">
+                                <div class="flex flex-col">
+                                    <span class="text-xs text-slate-500 font-bold mb-0.5"><i class="fa-solid fa-truck text-slate-400"></i> 垃圾車</span>
+                                    <span class="font-black text-3xl ${isNext ? 'text-emerald-700' : timeColorClasses} leading-none">${stop.time}</span>
+                                </div>
+                                ${earlyMinutes > 0 ? `
+                                <div class="flex flex-col pl-3 border-l-2 border-slate-200">
+                                    <span class="text-xs text-amber-600 font-bold mb-0.5"><i class="fa-solid fa-person-running"></i> 建議到場</span>
+                                    <span class="font-bold text-xl text-amber-700 leading-none">${suggestedTime}</span>
+                                </div>
+                                ` : ''}
+                            </div>
+                            
+                            <h3 class="font-bold text-slate-800 text-lg mb-3 mt-2 flex items-center gap-2">
                                 <i class="fa-solid fa-location-dot ${iconColorClasses}"></i>
                                 ${stop.location}
                             </h3>
                             
                             <!-- 動作按鈕 -->
-                            <div class="flex gap-2 mt-2 pt-3 border-t border-slate-100">
+                            <div class="flex gap-2 pt-3 border-t ${isNext ? 'border-emerald-200' : 'border-slate-100'}">
                                 <a 
                                     href="${getDirectionsUrl(stop.location)}"
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    class="nav-btn flex-1 flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white py-2.5 px-4 rounded-lg font-medium transition-colors"
+                                    class="nav-btn flex-1 flex items-center justify-center gap-2 ${isNext ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-blue-600 hover:bg-blue-700'} text-white py-2.5 px-4 rounded-lg font-medium transition-colors"
                                 >
                                     <i class="fa-solid fa-location-arrow"></i>
-                                    開啟 Google 導航
+                                    ${isNext ? '立即導航前往' : '預先查看導航'}
                                 </a>
                             </div>
                         </div>
@@ -206,12 +323,19 @@
             }
         });
 
+        // 監聽提前時間設定變更
+        document.getElementById('early-minutes').addEventListener('change', (e) => {
+            earlyMinutes = parseInt(e.target.value);
+            // 強制重設 banner 的狀態標記，讓畫面立即根據新時間更新
+            const bannerEl = document.getElementById('next-stop-banner');
+            if(bannerEl) bannerEl.dataset.early = ""; 
+            updateNextStopStatus();
+        });
+
         // 頁面載入初始化
         window.onload = () => {
-            updateClock();
-            setInterval(updateClock, 1000); // 每秒更新時鐘
-            updateMapDisplay(scheduleData[0]); // 初始化地圖
-            renderTimeline(); // 初始化清單
+            updateClock(); // 第一次執行會同時觸發 updateNextStopStatus 和 renderTimeline
+            setInterval(updateClock, 1000); // 每秒自動更新時鐘與狀態
         };
     </script>
 </body>
