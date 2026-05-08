@@ -104,7 +104,7 @@
             { id: 5, time: '20:05', location: '花蓮市華興街72號', note: '里長家前', conflict: false },
             { id: 6, time: '20:08', location: '花蓮市華興街球崙街口', note: '車號 KEU-6210', conflict: false },
             { id: 7, time: '20:15', location: '花蓮市化道路146巷9號', note: '車號 KEU-6210', conflict: false },
-            { id: 8, time: '20:25', location: '花蓮市凱悅大樓', note: '車號 KEU-6210', conflict: false },
+            { id: 8, time: '20:25', location: '花蓮市凱悅大樓', searchQuery: '花蓮市球崙一路217號', note: '車號 KEU-6210', conflict: false },
             { id: 9, time: '20:30', location: '花蓮市華民街21號', note: '車號 KEU-6210', conflict: true },
             { id: 10, time: '20:30', location: '花蓮市府前路北興路口', note: '車號 KEU-6211 (建議分兵)', conflict: true },
             { id: 11, time: '20:45', location: '花蓮市華廈街大樓', note: '車號 KEU-6210', conflict: false },
@@ -128,18 +128,20 @@
         };
 
         // 取得 Google Maps 嵌入網址
-        const getEmbedMapUrl = (location) => {
-            return `https://maps.google.com/maps?q=${encodeURIComponent(location)}&t=m&z=16&output=embed&iwloc=near`;
+        const getEmbedMapUrl = (stop) => {
+            const query = stop.searchQuery || stop.location;
+            return `https://maps.google.com/maps?q=${encodeURIComponent(query)}&t=m&z=16&output=embed&iwloc=near`;
         };
 
         // 取得 Google Maps 導航連結
-        const getDirectionsUrl = (destination) => {
-            return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}`;
+        const getDirectionsUrl = (stop) => {
+            const query = stop.searchQuery || stop.location;
+            return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(query)}`;
         };
 
         // 更新上方地圖區域
         const updateMapDisplay = (stop) => {
-            document.getElementById('gmap-iframe').src = getEmbedMapUrl(stop.location);
+            document.getElementById('gmap-iframe').src = getEmbedMapUrl(stop);
             document.getElementById('map-label').innerText = `預覽: ${stop.location}`;
         };
 
@@ -197,7 +199,7 @@
                                         ` : ''}
                                     </div>
                                 </div>
-                                <a href="${getDirectionsUrl(nextStop.location)}" target="_blank" class="bg-emerald-600 text-white w-12 h-12 flex items-center justify-center rounded-full shadow-md hover:bg-emerald-700 transition-colors shrink-0">
+                                <a href="${getDirectionsUrl(nextStop)}" target="_blank" class="bg-emerald-600 text-white w-12 h-12 flex items-center justify-center rounded-full shadow-md hover:bg-emerald-700 transition-colors shrink-0">
                                     <i class="fa-solid fa-location-arrow text-xl"></i>
                                 </a>
                             </div>
@@ -289,7 +291,7 @@
                             <!-- 動作按鈕 -->
                             <div class="flex gap-2 pt-3 border-t ${isNext ? 'border-emerald-200' : 'border-slate-100'}">
                                 <a 
-                                    href="${getDirectionsUrl(stop.location)}"
+                                    href="${getDirectionsUrl(stop)}"
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     class="nav-btn flex-1 flex items-center justify-center gap-2 ${isNext ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-blue-600 hover:bg-blue-700'} text-white py-2.5 px-4 rounded-lg font-medium transition-colors"
