@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>垃圾車拜票行程導航小幫手</title>
+    <!-- 引入 Tailwind CSS 進行排版與樣式設計 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 FontAwesome 圖示庫 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* 隱藏捲軸但保留捲動功能 (提升APP視覺體驗) */
+        ::-webkit-scrollbar {
+            width: 0px;
+            background: transparent;
+        }
+        body {
+            -webkit-tap-highlight-color: transparent;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans pb-20">
+
+    <!-- 頂部導航列 -->
+    <header class="bg-blue-600 text-white p-4 sticky top-0 z-50 shadow-md">
+        <div class="max-w-md mx-auto flex items-center justify-between">
+            <h1 class="text-xl font-bold flex items-center gap-2">
+                <i class="fa-solid fa-map-location-dot"></i>
+                拜票行程導航
+            </h1>
+            <div class="text-sm bg-blue-700 px-3 py-1 rounded-full flex items-center gap-1">
+                <i class="fa-regular fa-clock"></i>
+                <span id="current-time">00:00</span>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-md mx-auto">
+        <!-- 地圖顯示區塊 (置頂) -->
+        <div class="bg-white p-2 shadow-sm mb-4 sticky top-[68px] z-40">
+            <div class="rounded-lg overflow-hidden border border-slate-200 relative bg-slate-100 flex items-center justify-center h-48 sm:h-64">
+                <iframe
+                    id="gmap-iframe"
+                    title="Google Map"
+                    width="100%"
+                    height="100%"
+                    frameborder="0"
+                    style="border: 0;"
+                    src=""
+                    allowfullscreen
+                ></iframe>
+                <div id="map-label" class="absolute top-2 left-2 bg-white/90 px-3 py-1 rounded-md shadow-sm text-sm font-bold text-blue-700 border border-blue-100">
+                    預覽: 載入中...
+                </div>
+            </div>
+        </div>
+
+        <!-- 策略提示區塊 -->
+        <div class="mx-4 mb-6 bg-amber-50 border-l-4 border-amber-500 p-4 rounded-r-lg shadow-sm">
+            <div class="flex items-start gap-3">
+                <i class="fa-solid fa-triangle-exclamation text-amber-500 mt-1 text-lg"></i>
+                <div>
+                    <h3 class="font-bold text-amber-800">拜票策略建議</h3>
+                    <p class="text-sm text-amber-700 mt-1">
+                        最佳路徑為依照下方時間軸推進。請注意 <strong>20:30</strong> 有兩個不同地點，建議候選人維持原線(華民街)，安排志工前往另一處(府前路)。
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 時間軸清單 -->
+        <div class="px-4">
+            <h2 class="text-lg font-bold text-slate-700 mb-4 flex items-center gap-2">
+                <i class="fa-solid fa-circle-check text-green-500"></i>
+                今日出發時刻表
+            </h2>
+            
+            <div class="relative border-l-2 border-blue-200 ml-3 space-y-6" id="timeline-container">
+                <!-- 行程卡片將由 JavaScript 動態生成在這裡 -->
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // --- 1. 定義行程資料 ---
+        const scheduleData = [
+            { id: 1, time: '19:15', location: '花蓮市復興國小', note: '車號 KEU-6210', conflict: false },
+            { id: 2, time: '19:45', location: '花蓮市球崙二路', note: '車號 KEU-6210', conflict: false },
+            { id: 3, time: '19:50', location: '花蓮市球崙一路簡易庭', note: '車號 KEU-6210', conflict: false },
+            { id: 4, time: '20:00', location: '花蓮市北興路10-1號', note: '車號 KEU-6210', conflict: false },
+            { id: 5, time: '20:05', location: '花蓮市華興街72號', note: '里長家前', conflict: false },
+            { id: 6, time: '20:08', location: '花蓮市華興街球崙街口', note: '車號 KEU-6210', conflict: false },
+            { id: 7, time: '20:15', location: '花蓮市化道路146巷9號', note: '車號 KEU-6210', conflict: false },
+            { id: 8, time: '20:25', location: '花蓮市凱悅大樓', note: '車號 KEU-6210', conflict: false },
+            { id: 9, time: '20:30', location: '花蓮市華民街21號', note: '車號 KEU-6210', conflict: true },
+            { id: 10, time: '20:30', location: '花蓮市府前路北興路口', note: '車號 KEU-6211 (建議分兵)', conflict: true },
+            { id: 11, time: '20:45', location: '花蓮市華廈街大樓', note: '車號 KEU-6210', conflict: false },
+            { id: 12, time: '20:50', location: '花蓮市球崙二路262號', note: '秋凡', conflict: false },
+        ];
+
+        let selectedStopId = scheduleData[0].id;
+
+        // --- 2. 輔助函式 ---
+        // 取得 Google Maps 嵌入網址
+        const getEmbedMapUrl = (location) => {
+            return `https://maps.google.com/maps?q=${encodeURIComponent(location)}&t=m&z=16&output=embed&iwloc=near`;
+        };
+
+        // 取得 Google Maps 導航連結
+        const getDirectionsUrl = (destination) => {
+            return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}`;
+        };
+
+        // 更新頂部時鐘
+        const updateClock = () => {
+            const now = new Date();
+            const timeString = now.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false });
+            document.getElementById('current-time').innerText = timeString;
+        };
+
+        // 更新上方地圖區域
+        const updateMapDisplay = (stop) => {
+            document.getElementById('gmap-iframe').src = getEmbedMapUrl(stop.location);
+            document.getElementById('map-label').innerText = `預覽: ${stop.location}`;
+        };
+
+        // --- 3. 渲染行程清單 ---
+        const renderTimeline = () => {
+            const container = document.getElementById('timeline-container');
+            container.innerHTML = ''; // 清空現有內容
+
+            scheduleData.forEach(stop => {
+                const isSelected = stop.id === selectedStopId;
+                
+                // 動態設定樣式類別
+                let cardClasses = 'bg-white border-slate-200 hover:border-blue-300';
+                if (isSelected) {
+                    cardClasses = 'bg-blue-50 border-blue-400 ring-1 ring-blue-400';
+                } else if (stop.conflict) {
+                    cardClasses = 'bg-red-50/50 border-red-200';
+                }
+
+                const dotClasses = isSelected ? 'border-blue-600 bg-blue-100' : 'border-blue-300 bg-white';
+                const timeColorClasses = stop.conflict ? 'text-red-600' : 'text-blue-700';
+                const iconColorClasses = isSelected ? 'text-blue-600' : 'text-slate-400';
+
+                // 生成單個項目的 HTML
+                const itemHTML = `
+                    <div class="relative pl-6 timeline-item" data-id="${stop.id}">
+                        <!-- 時間軸圓點 -->
+                        <div class="absolute -left-[9px] top-1 w-4 h-4 rounded-full border-2 ${dotClasses} transition-colors"></div>
+
+                        <!-- 行程卡片 -->
+                        <div class="p-4 rounded-xl border transition-all cursor-pointer shadow-sm ${cardClasses}">
+                            <div class="flex justify-between items-start mb-2">
+                                <div class="flex items-center gap-2">
+                                    <span class="font-bold text-lg ${timeColorClasses}">
+                                        ${stop.time}
+                                    </span>
+                                    ${stop.conflict ? '<span class="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded border border-red-200">時間重疊</span>' : ''}
+                                </div>
+                                <span class="text-xs text-slate-500 bg-slate-100 px-2 py-1 rounded">
+                                    ${stop.note}
+                                </span>
+                            </div>
+                            
+                            <h3 class="font-bold text-slate-800 text-lg mb-3 flex items-center gap-2">
+                                <i class="fa-solid fa-location-dot ${iconColorClasses}"></i>
+                                ${stop.location}
+                            </h3>
+                            
+                            <!-- 動作按鈕 -->
+                            <div class="flex gap-2 mt-2 pt-3 border-t border-slate-100">
+                                <a 
+                                    href="${getDirectionsUrl(stop.location)}"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    class="nav-btn flex-1 flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white py-2.5 px-4 rounded-lg font-medium transition-colors"
+                                >
+                                    <i class="fa-solid fa-location-arrow"></i>
+                                    開啟 Google 導航
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                container.insertAdjacentHTML('beforeend', itemHTML);
+            });
+        };
+
+        // --- 4. 事件監聽與初始化 ---
+        // 監聽清單點擊事件 (Event Delegation)
+        document.getElementById('timeline-container').addEventListener('click', (e) => {
+            // 如果點擊的是導航按鈕，不要觸發卡片選取
+            if (e.target.closest('.nav-btn')) return;
+
+            const item = e.target.closest('.timeline-item');
+            if (item) {
+                const newSelectedId = parseInt(item.dataset.id);
+                if (newSelectedId !== selectedStopId) {
+                    selectedStopId = newSelectedId;
+                    const selectedStop = scheduleData.find(s => s.id === selectedStopId);
+                    updateMapDisplay(selectedStop);
+                    renderTimeline(); // 重新渲染清單以更新選取樣式
+                }
+            }
+        });
+
+        // 頁面載入初始化
+        window.onload = () => {
+            updateClock();
+            setInterval(updateClock, 1000); // 每秒更新時鐘
+            updateMapDisplay(scheduleData[0]); // 初始化地圖
+            renderTimeline(); // 初始化清單
+        };
+    </script>
+</body>
+</html>
